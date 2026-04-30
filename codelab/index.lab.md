@@ -3,7 +3,7 @@ id: trustable-at-100-mph
 summary: This codelab walks learners through building a racing coach simulator that combines real-time telemetry, LLM reasoning, and encoded human guidance to demonstrate how to create more trustable AI systems.
 authors: EXTERNAL Hemanth HM, Vikram Tiwari, Lynn Langit, Sebastian Gomez, Rabimba Karanjai, Alvaro Huanca Mamani, Peter Lubbers, Cody Nicoll, Frank Greco  GOOGLERS AJ Mirwani
 categories: cloud, ai & machine learning
-tags: cloud, ai, llm, trustability, Vertex AI Studio, Gemini, machine learning
+tags: cloud, ai, llm, trustability, Agent Studio, Gemini, machine learning
 duration: 0
 keywords: docType:Codelab,product:ArtifactRegistry,product:ComputeEngine,product:ConfidentialComputing
 ---
@@ -178,11 +178,11 @@ C. Obtaining a Gemini API key
 
    
 
-   To create a Gemini API Key, we need to use [Google Vertex AI Studio](https://console.cloud.google.com/vertex-ai/studio) to generate keys.
+   To create a Gemini API Key, we need to use [Google AI Studio](https://aistudio.google.com/) to generate keys.
 
    
 
-   Within Vertex AI Studio, click on “Get API key” in the bottom left corner above “Documentation”. Create an API key for Gemini (it looks like a long string of seemingly random characters).  Save this key in a secure location.  We will use this API key in Step 6 “Build the Racing Car Simulator” to authenticate our access to Gemini in Google Cloud.
+   Within Google AI Studio, click on “Get API key” in the bottom left corner. Create an API key for Gemini (it looks like a long string of seemingly random characters).  Save this key in a secure location.  We will use this API key in Step 6 “Build the Racing Car Simulator” to authenticate our access to Gemini in Google Cloud.
 
 
 > aside positive
@@ -538,7 +538,7 @@ Trust is not only about correctness. It is also about delivery. Advice that is t
 A trustable system must communicate well. The user experience is part of the trust architecture.
 
 > aside positive
-In production, you would typically give each coach a distinct voice instead of using one voice that changes pitch and inflection. However, text to speech significantly increases the number of tokens sent over the network. That added cost can grow quickly and may consume your free credits. With a production cloud account, though, you can enable and hear different coach voices.
+In production, you would typically give each coach a distinct voice instead of using one voice that changes pitch and inflection. However, text to speech (TTS) capability significantly increases the number of tokens sent over the network. That added cost can grow quickly and may consume your free credits. With a production cloud account, though, you can enable and hear different coach voices.
 
 ## Review the End-to-End Architecture
 
