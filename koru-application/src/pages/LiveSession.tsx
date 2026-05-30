@@ -68,7 +68,7 @@ export default function LiveSession({ apiKey }: LiveSessionProps) {
     if (status === 'connected') {
       streamRef.current.disconnect();
     } else {
-      const url = sseUrl.trim() || '/mock-telemetry.txt';
+      const url = sseUrl.trim() || 'http://localhost:8080/events';
       streamRef.current.connect(url);
     }
   }, [status, sseUrl]);

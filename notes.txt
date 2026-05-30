@@ -258,3 +258,36 @@ If you decide to add a database later, the frontend still won't need to know how
        59     );
        60
        61     const generateAudio = useCallback(async (text: string, voiceName = 'Zephyr'): Promise<Blob | null> => {
+
+
+
+
+    *********************************************************************************************************************************************
+
+
+
+✦ Successfully updated the application to support local streaming and the gemini-2.5-flash-lite model.
+
+  Key Changes Made:
+
+   1. Frontend (Koru Application):
+       * GeminiService: Updated to use gemini-2.5-flash-lite and changed the API endpoint to http://localhost:8080/coach.
+       * LiveSession Page: Updated the default SSE URL to http://localhost:8080/events for seamless local connection.
+
+   2. Streaming Telemetry Server:
+       * Confirmed that ingester.py is the modern server implementation using the new Google Gen AI SDK and defaulting to
+         gemini-2.5-flash-lite.
+       * Created a new helper script start_local_telemetry.sh in the project root. This script automates setting up the virtual
+         environment, installing dependencies, and launching the ingester.py server on port 8080.
+
+  To Run Locally:
+
+   1. Start the Telemetry Server:
+
+   1     ./start_local_telemetry.sh
+   2. Start the Frontend:
+
+   1     cd koru-application
+   2     npm run dev
+   3. Connect: Open the Koru Dashboard in your browser, go to Live Session, and click Connect. It will now automatically point to your
+      local server.

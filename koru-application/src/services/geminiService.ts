@@ -26,7 +26,7 @@ OUTPUT FORMAT:
 ### Analysis
 [Detailed explanation using markdown]`;
 
-    return this.callApi('gemini-2.0-flash', prompt);
+    return this.callApi('gemini-2.5-flash-lite', prompt);
   }
 
   /** Deep lap analysis with Pro + thinking */
@@ -49,7 +49,7 @@ Analyze the lap. For each issue found:
 **Telemetry Evidence:** [data reference]
 **Fix:** [actionable instruction]`;
 
-    return this.callApi('gemini-2.0-flash', prompt);
+    return this.callApi('gemini-2.5-flash-lite', prompt);
   }
 
   private async callApi(model: string, prompt: string, generationConfig?: Record<string, unknown>): Promise<string> {
@@ -63,9 +63,9 @@ Analyze the lap. For each issue found:
     
 
     try {
-      // Assuming your Python server runs on port 8000 (standard for FastAPI)
+      // Assuming your Python server runs on port 8080
       const res = await fetch(
-        `https://streaming-telemetry-server-861069162998.us-central1.run.app/coach`,
+        `http://localhost:8080/coach`,
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
