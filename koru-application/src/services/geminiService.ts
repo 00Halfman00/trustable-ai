@@ -4,9 +4,8 @@ import { RACING_PHYSICS_KNOWLEDGE } from '../utils/coachingKnowledge';
  * Gemini Cloud REST wrapper for lap analysis and coaching.
  */
 export class GeminiService {
-  private apiKey: string;
 
-  constructor(apiKey: string) { this.apiKey = apiKey; }
+  constructor() {}
 
   /** Generate coaching feedback with Flash */
   async generateCoaching(contextString: string): Promise<string> {
@@ -54,25 +53,36 @@ Analyze the lap. For each issue found:
   }
 
   private async callApi(model: string, prompt: string, generationConfig?: Record<string, unknown>): Promise<string> {
-    const body: Record<string, unknown> = {
-      contents: [{ parts: [{ text: prompt }] }],
+    // No longer sending the body to Google's URL.
+    // We are sending it to YOUR Python Telemetry Server.
+    const body = {
+      model: model,
+      prompt: prompt,
+      generationConfig: generationConfig
     };
-    if (generationConfig) body.generationConfig = generationConfig;
+    
 
     try {
+      // Assuming your Python server runs on port 8000 (standard for FastAPI)
       const res = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${this.apiKey}`,
-        { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }
+        `https://streaming-telemetry-server-861069162998.us-central1.run.app/coach`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body)
+        }
       );
+
       if (!res.ok) {
         const err = await res.json();
-        throw new Error(err.error?.message || res.statusText);
+        throw new Error(err.detail || res.statusText);
       }
       const data = await res.json();
-      return data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+      return data.text  || '';  // Adjust this based on how you structure your Python return (e.g., data.text)
+
     } catch (err) {
       console.error('GeminiService error:', err);
-      return '';
+      return 'The Strategy Coach is unavailable. Please check the backend telemetry server.';
     }
   }
 }

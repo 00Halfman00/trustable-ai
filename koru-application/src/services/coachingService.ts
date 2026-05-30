@@ -1,6 +1,7 @@
 import type { TelemetryFrame, CoachAction, Corner } from '../types';
 import { COACHES, DEFAULT_COACH, DECISION_MATRIX, RACING_PHYSICS_KNOWLEDGE } from '../utils/coachingKnowledge';
 import { THUNDERHILL_EAST } from '../data/trackData';
+import { GeminiService } from './geminiService';
 
 type CoachingCallback = (msg: { path: 'hot' | 'cold' | 'feedforward'; action?: CoachAction; text: string }) => void;
 
@@ -20,6 +21,7 @@ export class CoachingService {
   private coldCooldownMs = 15000;
   private hotCooldownMs = 1500;
   private apiKey: string | null = null;
+  private geminiService = new GeminiService();
 
   setCoach(id: string) { this.coachId = id; }
   getCoach() { return COACHES[this.coachId] || COACHES[DEFAULT_COACH]; }
@@ -251,7 +253,6 @@ export class CoachingService {
   private async runColdPath(frame: TelemetryFrame) {
     const now = Date.now();
     if (now - this.lastColdTime < this.coldCooldownMs) return;
-    if (!this.apiKey) return;
 
     this.lastColdTime = now;
     const coach = this.getCoach();
@@ -259,10 +260,7 @@ export class CoachingService {
     const cornerName = this.lastCorner?.name || 'straight';
     const cornerAdvice = this.lastCorner?.advice || '';
 
-    const prompt = `${coach.systemPrompt}
-
-${RACING_PHYSICS_KNOWLEDGE}
-
+    const context = `
 Current Telemetry:
 Speed: ${frame.speed.toFixed(1)} mph | Brake: ${frame.brake.toFixed(0)}% | Throttle: ${frame.throttle.toFixed(0)}%
 G-Lat: ${frame.gLat.toFixed(2)} | G-Long: ${frame.gLong.toFixed(2)}
@@ -271,19 +269,7 @@ Location: ${cornerName} - ${cornerAdvice}
 Give a short coaching instruction followed by a brief physics-based explanation.`;
 
     try {
-      const res = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${this.apiKey}`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }),
-        }
-      );
-      if (!res.ok) return;
-      const data = await res.json();
-      const text = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
-      // ☁️ PROBE 4 — Strategy path (Gemini) responding:
-      //console.log('Strategy', { coach: coach.id, chars: text.length, preview: text.slice(0, 60) });
+      const text = await this.geminiService.generateCoaching(context);
       if (text) this.emit({ path: 'cold', text });
     } catch (err) {
       console.error('Strategy path failed:', err);

@@ -1,1 +1,1 @@
-web: python ingest.py --mock
+web: python ingester.py --mock

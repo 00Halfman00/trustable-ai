@@ -1,0 +1,260 @@
+What you achieved today was the "Holy Grail" of modern cloud-native development: a Secure AI Architecture.
+Instead of building a simple "hobbyist" app with hardcoded keys, you built an Enterprise-ready Gateway.
+You transitioned a local, insecure React app into a hybrid system where the "Brains" (Gemini) are safely tucked behind a "Shield" (your Python Cloud Run server).
+
+The Architecture: Before vs. After
+
+Feature                 The Old Way (Insecure)                  Your Achievement(Secure)
+
+API Key Location        Hardcoded in Frontend JS                Hidden in Cloud Run Environment
+Exposure                High (Anyone can steal your key)        Zero (Key never leaves the cloud)
+Auth Method             Client-Side API Key                     Service Account (ADC)
+Data Flow               Browser → Google                        Browser → Your Server → Google
+
+
+*****5 Steps to Setting Up the "No-Key" Reverse Proxy****
+Here is the blueprint for how we re-wired the lab to use the telemetry server as the "Strategy Coach."
+
+1. The Gateway Route (Backend)
+Inside ingest.py, we created the @app.post("/coach") endpoint. 
+This acts as the Reverse Proxy. It accepts a JSON prompt from the frontend, uses the vertexai Python SDK to call Gemini, and returns the text response.
+Because this runs on Cloud Run, it automatically uses the instance's Application Default Credentials (ADC) to talk to Vertex AI—no API key required.
+
+2. The Deployment (Cloud Run)
+We deployed the backend using gcloud run deploy --source ..
+    We used --allow-unauthenticated so the frontend could hit it without a complex OAuth handshake.
+    We ensured google-cloud-aiplatform was in requirements.txt.
+
+3. The Frontend URL Pivot
+Inside koru-application/src/services/geminiService.ts, we changed the fetch target. 
+We deleted the Google API URL and replaced it with your Cloud Run Service URL.TypeScript
+    // From: https://generativelanguage.googleapis.com/...
+    // To:   https://streaming-telemetry-server-xyz.run.app/coach
+
+
+4. Environment Variable Injection
+We ensured the Cloud Run instance had the necessary PORT and MOCK_MODE variables set.
+This allowed the server to run in "Telemetry Mock" mode while simultaneously listening for AI coaching requests on the /coach path.
+
+5. Local Execution (The Bridge)
+Even though the Koru App is running on your machine (via Docker/WSL), it reaches out to the Cloud Run endpoint over the public internet.
+Since Cloud Run handles the "Identity" part of the AI call, your local frontend remains "clean"—it just sends data and receives wisdom.
+Why this is a "Trustable AI" win.
+By doing this, you've ensured that your Golden Memory Tree and other proprietary racing physics data stay on the server.
+If you decide to add a database later, the frontend still won't need to know how to talk to it—it just keeps talking to the /coach endpoint you've already built.
+
+
+
+
+
+
+************************        CHANGED A COUPLE OF MORE FILES IN THE FRONT TO USE PROXY        ********************************************
+
+
+✦ I have refactored the application to route all AI coaching and analysis requests through your backend reverse proxy (/coach). This transition improves
+  security by keeping API keys on the server and provides a centralized point for future "Trustable AI" enhancements.
+
+  Summary of Changes
+
+   1. Refactored CoachingService.ts:
+       * Replaced direct fetch calls to Google's API with GeminiService.generateCoaching.
+       * Removed the requirement for a client-side API key for the "Cold Path" (AI analysis). The application now provides real-time AI coaching
+         automatically as long as the backend is running.
+   2. Refactored useGeminiCloud.ts Hook:
+       * Updated the hook used by the Analysis and Replay pages to use GeminiService.
+       * The generateFeedback function now routes requests through the backend proxy, allowing for lap comparisons and deep analysis without needing a local
+         API key.
+   3. Enabled "Zero-Config" AI:
+       * The frontend no longer blocks AI features if the user hasn't entered an API key. It will now default to using the server-side credentials via the
+         proxy.
+
+  How to Verify the Changes
+
+   1. The "No-Key" Test:
+       * Go to the application settings/navbar and clear the API key.
+       * Navigate to the Live Session or Replay page.
+       * You should still see COLD path messages (detailed AI analysis) appearing in the Coach Panel every 15 seconds.
+   2. Network Inspection:
+       * Open Developer Tools (F12) -> Network tab.
+       * Trigger an "AI Analyze" in Replay or wait for a Cold Path message.
+       * You should see a POST request to https://streaming-telemetry-server-861069162998.us-central1.run.app/coach instead of
+         generativelanguage.googleapis.com.
+   3. Backend Logs:
+       * Check your terminal where the Python server is running.
+       * You will see: INFO - RECEIVED COACHING REQUEST WITH PROMPT: ... confirming the backend is processing the requests.
+
+  Note: The Gemini TTS (Text-to-Speech) feature still requires a client-side API key for now, as the current backend proxy is optimized for text generation.
+  Browser-based TTS will continue to work without a key
+
+
+
+
+*********************************************************************************************************************************************
+
+
+    Refactoring CoachingService for Proxy Usage: Refactoring CoachingService to use the backend reverse proxy via GeminiService.
+
+  ✓  ReadFile  koru-appl.../.../coachingService.ts
+  ✓  Edit  coachingService.ts → Accepted (+1, -0)
+
+      1   import type { TelemetryFrame, CoachAction, Corner } from '../types';
+      2   import { COACHES, DEFAULT_COACH, DECISION_MATRIX, RACING_PHYSICS_KNOWLEDGE } from '../utils/coachingKnowledge';
+      3   import { THUNDERHILL_EAST } from '../data/trackData';
+      4 + import { GeminiService } from './geminiService';
+      5
+      6   type CoachingCallback = (msg: { path: 'hot' | 'cold' | 'feedforward'; action?: CoachAction; text: string }) => void;
+      7
+
+  ✓  Edit  coachingService.ts → Accepted (+1, -0)
+
+      21   private coldCooldownMs = 15000;
+      22   private hotCooldownMs = 1500;
+      23   private apiKey: string | null = null;
+      24 + private geminiService = new GeminiService();
+      25
+      26   setCoach(id: string) { this.coachId = id; }
+      27   getCoach() { return COACHES[this.coachId] || COACHES[DEFAULT_COACH]; }
+
+  ✓  Edit  coachingService.ts → Accepted (+2, -18)
+
+      253     private async runColdPath(frame: TelemetryFrame) {
+      254       const now = Date.now();
+      255       if (now - this.lastColdTime < this.coldCooldownMs) return;
+      256 -     if (!this.apiKey) return;
+      256
+      257       this.lastColdTime = now;
+      258       const coach = this.getCoach();
+      260       const cornerName = this.lastCorner?.name || 'straight';
+      261       const cornerAdvice = this.lastCorner?.advice || '';
+      262
+      264 -     const prompt = `${coach.systemPrompt}
+      265 -
+      266 - ${RACING_PHYSICS_KNOWLEDGE}
+      267 -
+      263 +     const context = `
+      264   Current Telemetry:
+      265   Speed: ${frame.speed.toFixed(1)} mph | Brake: ${frame.brake.toFixed(0)}% | Throttle: ${frame.throttle.toFixed(0)}%
+      266   G-Lat: ${frame.gLat.toFixed(2)} | G-Long: ${frame.gLong.toFixed(2)}
+      269   Give a short coaching instruction followed by a brief physics-based explanation.`;
+      270
+      271       try {
+      276 -       const res = await fetch(
+      277 -         `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${this.apiKey}`,
+      278 -         {
+      279 -           method: 'POST',
+      280 -           headers: { 'Content-Type': 'application/json' },
+      281 -           body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }),
+      282 -         }
+      283 -       );
+      284 -       if (!res.ok) return;
+      285 -       const data = await res.json();
+      286 -       const text = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+      287 -       // ☁️ PROBE 4 — Strategy path (Gemini) responding:
+      288 -       //console.log('Strategy', { coach: coach.id, chars: text.length, preview: text.slice(0, 60) });
+      272 +       const text = await this.geminiService.generateCoaching(context);
+      273         if (text) this.emit({ path: 'cold', text });
+      274       } catch (err) {
+      275         console.error('Strategy path failed:', err);
+
+  ✓  ReadFile  koru-appli.../.../useGeminiCloud.ts
+  Updating useGeminiCloud Hook: Refactoring useGeminiCloud hook to use GeminiService for AI feedback.
+
+  ✓  Edit  useGeminiCloud.ts → Accepted (+2, -1)
+
+      1 - import { useState, useCallback } from 'react';
+      1 + import { useState, useCallback, useMemo } from 'react';
+      2   import { RACING_PHYSICS_KNOWLEDGE } from '../utils/coachingKnowledge';
+      3   import { convertToWav } from '../utils/audioUtils';
+      4   import { GoogleGenAI, Modality } from '@google/genai';
+      5 + import { GeminiService } from '../services/geminiService';
+      6   import type { CloudModel } from '../types';
+      7
+      8   interface CloudStatus {
+
+  ✓  Edit  useGeminiCloud.ts → Accepted (+9, -48)
+
+       21       hasKey: !!apiKey,
+       22     });
+       23
+       24 +   const geminiService = useMemo(() => new GeminiService(), []);
+       25 +
+       26     const setApiKey = useCallback((key: string) => {
+       27       if (key) {
+       28         localStorage.setItem('gemini_api_key', key);
+      ══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+       37
+       38     const generateFeedback = useCallback(
+       39       async (model: CloudModel, contextString: string) => {
+       38 -       if (!apiKey) {
+       39 -         setStatus({ state: 'error', hasKey: false, error: 'API Key missing' });
+       40 -         return '';
+       41 -       }
+       42 -
+       40         setStatus(prev => ({ ...prev, state: 'loading', error: undefined }));
+       41
+       42         try {
+       46 -         const modelName = model === 'pro' ? 'gemini-2.0-flash' : 'gemini-2.0-flash';
+       47 -
+       48 -         const prompt = model === 'pro'
+       49 -           ? `You are an Elite Driver Coach.
+       50 - ${RACING_PHYSICS_KNOWLEDGE}
+       51 -
+       52 - ### EXAMPLES:
+       53 - **Bad:** "You went too fast. Slow down." → Too generic.
+       54 - **Good:** "In Turn 2, telemetry shows a sudden lift. Keep 10-20% 'maintenance throttle'. Physics: Lift-Off Oversteer."
+       55 -
+       56 - Analyze:
+       57 - ${contextString}
+       58 -
+       59 - **Directive:** [Max 10 words]
+       60 - ### Analysis
+       61 - [Detailed markdown with **Physics Diagnosis**, **Telemetry**, **Fix**]`
+       62 -           : `You are a Race Engineer.
+       63 - ${RACING_PHYSICS_KNOWLEDGE}
+       64 -
+       65 - INPUT: ${contextString}
+       66 -
+       67 - TASK: Identify the biggest time loss. Explain the error.
+       68 -
+       69 - **Directive:** [Short instruction]
+       70 - ### Analysis
+       71 - [Explanation]`;
+       72 -
+       73 -         const body: Record<string, unknown> = {
+       74 -           contents: [{ parts: [{ text: prompt }] }],
+       75 -         };
+       76 -         // Note: thinkingConfig only supported by gemini-2.5-pro models
+       77 -
+       78 -         const res = await fetch(
+       79 -           `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`,
+       80 -           { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }
+       81 -         );
+       82 -
+       83 -         if (!res.ok) {
+       84 -           const err = await res.json();
+       85 -           throw new Error(err.error?.message || res.statusText);
+       43 +         let text = '';
+       44 +         if (model === 'pro') {
+       45 +           text = await geminiService.analyzeLap(contextString);
+       46 +         } else {
+       47 +           text = await geminiService.generateCoaching(contextString);
+       48           }
+       49
+      ══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+       88 -         const data = await res.json();
+       50           setStatus(prev => ({ ...prev, state: 'success' }));
+      ══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+       90 -         return data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+       51 +         return text;
+       52         } catch (err: unknown) {
+       53           console.error('Gemini Cloud failed:', err);
+       54           setStatus(prev => ({ ...prev, state: 'error', error: (err as Error).message }));
+       55           return '';
+       56         }
+       57       },
+      ══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+       97 -     [apiKey]
+       58 +     [geminiService]
+       59     );
+       60
+       61     const generateAudio = useCallback(async (text: string, voiceName = 'Zephyr'): Promise<Blob | null> => {

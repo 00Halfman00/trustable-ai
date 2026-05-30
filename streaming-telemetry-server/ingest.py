@@ -4,19 +4,52 @@ import serial
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from sse_starlette.sse import EventSourceResponse
-import argparse
 import random
 import json
 import logging
 import sys
 from datetime import datetime, timezone
 
-# Configure logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+# Implement reverse proxy to bypass needing the use of API keys for the frontend (more secure, no need to expose api keys to frontend).
+# This is a simple pass through that can be extended in the future to support additional features like authentication, rate limiting, or data transformation if needed.
+# For now it just forwards messages from the serial reader or mock generator to the frontend via SSE.
+import vertexai
+from vertexai.generative_models import GenerativeModel
+from pydantic import BaseModel
+import os
+from dotenv import load_dotenv
+
+print("✅ ALL LIBRARIES ARE LOADED AND READY TO GO!")
+
+
+# <-----  I.    CONFIGURE LOGGING  ------>
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(message)s",
+    handlers=[logging.FileHandler("ingest.log"), logging.StreamHandler(sys.stdout)],
+)
 logger = logging.getLogger(__name__)
+print("✅ LOGGER ARE CONFIGURED, LOADED AND READY TO GO!")
+
+
+# <-----  II.   LOAD/INIT ENVIRNONMENT VARIABLES  ------>
+
+load_dotenv()
+PROJECT_ID = os.getenv("PROJECT_ID")
+LOCATION = os.getenv("LOCATION", "us-central1")
+vertexai.init(project=PROJECT_ID, location=LOCATION)
+ai_model = GenerativeModel("gemini-2.0-flash")
+
+if PROJECT_ID:
+    vertexai.init(project=PROJECT_ID, location=LOCATION)
+else:
+    logger.error("No project id is found. AI features will be disabled.")
+
+
+# <-----  III.   INIT RASTAPI APP AND CONFIGURE CORS ------>
 
 app = FastAPI()
-
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -25,11 +58,20 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
+class CoachingRequest(BaseModel):
+    prompt: str
+    model: str = "gemini-2.0-flash"
+    generationConfig: dict = None
+
+
 # Global queue for broadcasting messages
 message_queue = asyncio.Queue()
 
+
 async def broadcast_data(data: str):
     await broadcaster.publish(data)
+
 
 class Broadcaster:
     def __init__(self):
@@ -48,10 +90,13 @@ class Broadcaster:
         finally:
             self.subscribers.remove(queue)
 
+
 broadcaster = Broadcaster()
+
 
 class BinaryParser:
     """Scaffold for VBox Binary Protocol Parser."""
+
     def __init__(self):
         self.buffer = bytearray()
 
@@ -65,26 +110,20 @@ class BinaryParser:
         # self.buffer.extend(data)
         # Check for sync bytes, length, checksum, etc.
         # yield packet
-        
+
         # Placeholder: yield hex string of chunk
         if data:
-            yield {
-                "class": "BINARY",
-                "data": data.hex().upper()
-            }
+            yield {"class": "BINARY", "data": data.hex().upper()}
 
 
 # Global settings for mock mode
-mock_settings = {
-    "enabled": True,
-    "track_data": [],
-    "track_index": 0
-}
+mock_settings = {"enabled": True, "track_data": [], "track_index": 0}
 
-from pydantic import BaseModel
+
 import csv
 import re
 import os
+
 
 def parse_vbox_coord(coord_str: str) -> float:
     """
@@ -96,39 +135,41 @@ def parse_vbox_coord(coord_str: str) -> float:
         match = re.match(r"(\d+)°([\d\.]+)\s+([NSEW])", coord_str.strip())
         if not match:
             return 0.0
-        
+
         degrees = int(match.group(1))
         minutes = float(match.group(2))
         direction = match.group(3)
-        
+
         decimal_degrees = degrees + (minutes / 60.0)
-        
-        if direction in ['S', 'W']:
+
+        if direction in ["S", "W"]:
             decimal_degrees = -decimal_degrees
-            
+
         return decimal_degrees
     except Exception as e:
         logger.error(f"Error parsing coordinate {coord_str}: {e}")
         return 0.0
 
+
 def load_track_data(filepath: str):
     """Loads track data from VBOX CSV."""
+
     data = []
     try:
         # Resolve path relative to this script if needed, or assume absolute/cwd
         # The user said SampleStream2024.csv is in the root, so one level up from backend/
         if not os.path.exists(filepath):
-             # Try determining path relative to script location
-             script_dir = os.path.dirname(os.path.abspath(__file__))
-             filepath = os.path.join(script_dir, "..", "SampleStream2024.csv")
+            # Try determining path relative to script location
+            script_dir = os.path.dirname(os.path.abspath(__file__))
+            filepath = os.path.join(script_dir, "..", "SampleStream2024.csv")
 
         if not os.path.exists(filepath):
             logger.error(f"CSV file not found at {filepath}")
             return []
 
         logger.info(f"Loading track data from {filepath}...")
-        
-        with open(filepath, 'r', encoding='utf-8', errors='ignore') as f:
+
+        with open(filepath, "r", encoding="utf-8", errors="ignore") as f:
             # Skip first line if it's not header (VBOX csv active file seems to have header on line 1)
             # Based on view_file, line 1 is header.
             reader = csv.DictReader(f)
@@ -139,17 +180,19 @@ def load_track_data(filepath: str):
                     lon = parse_vbox_coord(row["Longitude"])
                     speed_kmh = float(row["Speed (km/h)"] or 0)
                     heading = float(row["Heading (Degrees)"] or 0)
-                    
-                    data.append({
-                        "lat": lat,
-                        "lon": lon,
-                        "speed_kmh": speed_kmh,
-                        "heading": heading
-                    })
+
+                    data.append(
+                        {
+                            "lat": lat,
+                            "lon": lon,
+                            "speed_kmh": speed_kmh,
+                            "heading": heading,
+                        }
+                    )
                     count += 1
                 except (ValueError, KeyError) as e:
-                    continue # Skip malformed rows
-            
+                    continue  # Skip malformed rows
+
             logger.info(f"Loaded {count} track points.")
             return data
 
@@ -157,36 +200,42 @@ def load_track_data(filepath: str):
         logger.error(f"Failed to load track data: {e}")
         return []
 
+
 class MockUpdate(BaseModel):
     enabled: bool
+
 
 @app.get("/state")
 async def get_state():
     return {"mock_enabled": mock_settings["enabled"]}
 
+
 @app.post("/mock")
 async def update_mock_state(update: MockUpdate):
     mock_settings["enabled"] = update.enabled
-    
+
     # Reset values if disabled
     if not update.enabled:
-         mock_settings["track_index"] = 0
-         logger.info("Mock Data Disabled & Reset")
+        mock_settings["track_index"] = 0
+        logger.info("Mock Data Disabled & Reset")
     else:
         logger.info("Mock Data Enabled")
-        
+
     return {"status": "ok", "mock_enabled": mock_settings["enabled"]}
+
 
 async def mock_gps_generator(mode: str = "nmea"):
     """Generates mock GPS data from VBOX CSV."""
     logger.info(f"Starting Mock GPS Generator in {mode} mode")
-    
+
     # Load data once
     mock_settings["track_data"] = load_track_data("SampleStream2024.csv")
-    
+
     if not mock_settings["track_data"]:
         logger.warning("No track data loaded. Falling back to static point.")
-        mock_settings["track_data"] = [{"lat": 37.7749, "lon": -122.4194, "speed_kmh": 0, "heading": 0}]
+        mock_settings["track_data"] = [
+            {"lat": 37.7749, "lon": -122.4194, "speed_kmh": 0, "heading": 0}
+        ]
 
     while True:
         if not mock_settings["enabled"]:
@@ -196,31 +245,33 @@ async def mock_gps_generator(mode: str = "nmea"):
         # Get current state from list
         idx = mock_settings["track_index"]
         track_data = mock_settings["track_data"]
-        
+
         # Wrap around
         if idx >= len(track_data):
             idx = 0
             mock_settings["track_index"] = 0
-            
+
         point = track_data[idx]
-        
+
         # Advance index for next tick
         mock_settings["track_index"] = idx + 1
 
         if mode == "binary":
             # Mock binary data (just random bytes for now)
             dummy_bytes = random.randbytes(16)
-            data = json.dumps({
-               "class": "BINARY",
-               "data": dummy_bytes.hex().upper(),
-               "device": "/dev/mock"
-            })
+            data = json.dumps(
+                {
+                    "class": "BINARY",
+                    "data": dummy_bytes.hex().upper(),
+                    "device": "/dev/mock",
+                }
+            )
         else:
-             speed_ms = point["speed_kmh"] / 3.6
-             current_time = datetime.now(timezone.utc).isoformat()
-             
-             # GPSD TPV Object
-             tpv = {
+            speed_ms = point["speed_kmh"] / 3.6
+            current_time = datetime.now(timezone.utc).isoformat()
+
+            # GPSD TPV Object
+            tpv = {
                 "class": "TPV",
                 "device": "/dev/mock",
                 "mode": 3,
@@ -233,14 +284,16 @@ async def mock_gps_generator(mode: str = "nmea"):
                 "climb": 0,
                 "epx": 0.5,
                 "epy": 0.5,
-                "epv": 1.0
+                "epv": 1.0,
             }
-             data = json.dumps(tpv)
-        
+            data = json.dumps(tpv)
+
         await broadcast_data(data)
-        await asyncio.sleep(0.1) # 10Hz
+        await asyncio.sleep(0.1)  # 10Hz
+
 
 import pynmea2
+
 
 def parse_nmea_sentence(line: str):
     """Parses an NMEA sentence and returns a structured dict or None."""
@@ -248,22 +301,22 @@ def parse_nmea_sentence(line: str):
         msg = pynmea2.parse(line)
         if isinstance(msg, (pynmea2.types.talker.RMC, pynmea2.types.talker.GGA)):
             # Extract data
-            lat = getattr(msg, 'latitude', 0.0)
-            lon = getattr(msg, 'longitude', 0.0)
-            speed_knots = getattr(msg, 'spd_over_grnd', 0.0)
+            lat = getattr(msg, "latitude", 0.0)
+            lon = getattr(msg, "longitude", 0.0)
+            speed_knots = getattr(msg, "spd_over_grnd", 0.0)
             speed_ms = float(speed_knots or 0) * 0.514444
-            heading = getattr(msg, 'true_course', 0.0)
-            
+            heading = getattr(msg, "true_course", 0.0)
+
             current_time = datetime.now(timezone.utc).isoformat()
-            
+
             return {
                 "class": "TPV",
                 "device": "/dev/serial",
-                "mode": 3 if msg.is_valid else 1, # Simplified mode logic
+                "mode": 3 if msg.is_valid else 1,  # Simplified mode logic
                 "time": current_time,
                 "lat": lat,
                 "lon": lon,
-                "alt": getattr(msg, 'altitude', 0.0),
+                "alt": getattr(msg, "altitude", 0.0),
                 "speed": speed_ms,
                 "track": float(heading or 0),
             }
@@ -273,25 +326,28 @@ def parse_nmea_sentence(line: str):
         logger.error(f"Error parsing NMEA: {e}")
     return None
 
+
 async def serial_reader(port: str, baud: int, binary_mode: bool = False):
     """Reads data from the serial port and broadcasts it."""
-    logger.info(f"Starting Serial Reader on {port} at {baud} baud (Binary: {binary_mode})")
+    logger.info(
+        f"Starting Serial Reader on {port} at {baud} baud (Binary: {binary_mode})"
+    )
     parser = BinaryParser() if binary_mode else None
-    
+
     try:
         reader, _ = await serial_asyncio.open_serial_connection(url=port, baudrate=baud)
         while True:
             if binary_mode:
-                 # Read chunks
-                 chunk = await reader.read(1024)
-                 if chunk:
-                     for packet in parser.parse(chunk):
-                         await broadcast_data(json.dumps(packet))
+                # Read chunks
+                chunk = await reader.read(1024)
+                if chunk:
+                    for packet in parser.parse(chunk):
+                        await broadcast_data(json.dumps(packet))
             else:
                 line = await reader.readline()
                 if line:
                     try:
-                        decoded_line = line.decode('utf-8', errors='ignore').strip()
+                        decoded_line = line.decode("utf-8", errors="ignore").strip()
                         if decoded_line:
                             parsed = parse_nmea_sentence(decoded_line)
                             if parsed:
@@ -310,9 +366,11 @@ async def serial_reader(port: str, baud: int, binary_mode: bool = False):
     except Exception as e:
         logger.error(f"Error in serial reader: {e}")
 
+
 @app.get("/events")
 async def message_stream(request: Request):
     """SSE endpoint."""
+
     async def event_generator():
         async for message in broadcaster.subscribe():
             if await request.is_disconnected():
@@ -321,30 +379,83 @@ async def message_stream(request: Request):
 
     return EventSourceResponse(event_generator())
 
+
+@app.post("/coach")
+async def get_coach_proxy(request: CoachingRequest):
+    """
+    Reverse proxy for Gemini calls using Vertex AI SDK.
+    This allows the frontend to request coaching content
+    without needing direct access to API keys or the Vertex AI environment.
+    The backend handles the interaction with the Gemini model and returns the generated response.
+    """
+    prompt = request.prompt
+    logger.info(f"Received coaching prompt: {prompt}")
+
+    try:
+        response = ai_model.generate_content(prompt)
+        logger.info("Generated AI response successfully.")
+        return {"text": response.text}
+    except Exception as e:
+        logger.error(f"Error generating AI response: {e}")
+        return {"text": "Sorry, an error occurred while generating the response."}
+
+
+# if __name__ == "__main__":
+#     parser = argparse.ArgumentParser(description="VBox Streamer Backend")
+#     parser.add_argument("--mock", action="store_true", help="Run in mock mode")
+#     parser.add_argument("--binary", action="store_true", help="Enable binary protocol mode")
+#     parser.add_argument("--port", type=str, default="/dev/ttyUSB0", help="Serial port")
+#     parser.add_argument("--baud", type=int, default=115200, help="Baud rate")
+
+#     args = parser.parse_args()
+
+#     import uvicorn
+#     from dotenv import load_dotenv
+
+#     load_dotenv()
+
+#     # Priority: Env Var > Default
+#     port = int(os.getenv("PORT", 8000))
+#     host = os.getenv("HOST", "0.0.0.0")
+
+#     @app.on_event("startup")
+#     async def startup_event():
+#         if args.mock:
+#             mode = "binary" if args.binary else "nmea"
+#             asyncio.create_task(mock_gps_generator(mode))
+#         else:
+#             asyncio.create_task(serial_reader(args.port, args.baud, args.binary))
+
+#     uvicorn.run(app, host=host, port=port)
+
+
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="VBox Streamer Backend")
-    parser.add_argument("--mock", action="store_true", help="Run in mock mode")
-    parser.add_argument("--binary", action="store_true", help="Enable binary protocol mode")
-    parser.add_argument("--port", type=str, default="/dev/ttyUSB0", help="Serial port")
-    parser.add_argument("--baud", type=int, default=115200, help="Baud rate")
-    
-    args = parser.parse_args()
-    
     import uvicorn
     from dotenv import load_dotenv
-    
+
     load_dotenv()
-    
-    # Priority: Env Var > Default
-    port = int(os.getenv("PORT", 8000))
-    host = os.getenv("HOST", "0.0.0.0")
-    
+
+    # 1. Handle Port/Host (Prioritize Cloud Run's $PORT)
+    # Defaulting to 8080 is critical for Cloud Run
+    server_port = int(os.environ.get("PORT", 8080))
+    server_host = os.environ.get("HOST", "0.0.0.0")
+
+    # 2. Handle Logic Flags via Environment Variables
+    # This allows Cloud Run to run in "mock" mode without needing --flags
+    is_mock = os.environ.get("MOCK_MODE", "true").lower() == "true"
+    is_binary = os.environ.get("BINARY_MODE", "false").lower() == "true"
+    # Needs physical access to a USB port (/dev/ttyUSB0) to read real hardware data from a VBOX.
+    serial_port = os.environ.get("SERIAL_PORT", "/dev/ttyUSB0")
+    baud_rate = int(os.environ.get("BAUD_RATE", 115200))
+
     @app.on_event("startup")
     async def startup_event():
-        if args.mock:
-            mode = "binary" if args.binary else "nmea"
+        if is_mock:
+            mode = "binary" if is_binary else "nmea"
+            print(f"Starting in MOCK mode ({mode})")
             asyncio.create_task(mock_gps_generator(mode))
         else:
-            asyncio.create_task(serial_reader(args.port, args.baud, args.binary))
-    
-    uvicorn.run(app, host=host, port=port)
+            print(f"Starting SERIAL mode on {serial_port}")
+            asyncio.create_task(serial_reader(serial_port, baud_rate, is_binary))
+
+    uvicorn.run(app, host=server_host, port=server_port)

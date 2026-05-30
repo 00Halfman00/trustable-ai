@@ -1,6 +1,7 @@
 fastapi
 uvicorn
 sse-starlette
+google-cloud-aiplatform
 pyserial
 pyserial-asyncio
 pydantic

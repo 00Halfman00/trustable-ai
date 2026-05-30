@@ -1,4 +1,8 @@
-import type { TelemetryFrame, GpsSSEPoint, SSEConnectionStatus } from '../types';
+import type {
+  TelemetryFrame,
+  GpsSSEPoint,
+  SSEConnectionStatus,
+} from "../types";
 
 type TelemetryCallback = (frame: TelemetryFrame) => void;
 
@@ -13,7 +17,7 @@ export class TelemetryStreamService {
   private replayTimer: ReturnType<typeof setTimeout> | null = null;
   private prevPoint: GpsSSEPoint | null = null;
   private prevTime = 0;
-  private status: SSEConnectionStatus = 'disconnected';
+  private status: SSEConnectionStatus = "disconnected";
   private statusListeners: ((s: SSEConnectionStatus) => void)[] = [];
 
   static getInstance(): TelemetryStreamService {
@@ -23,48 +27,56 @@ export class TelemetryStreamService {
     return TelemetryStreamService.instance;
   }
 
-  getStatus(): SSEConnectionStatus { return this.status; }
+  getStatus(): SSEConnectionStatus {
+    return this.status;
+  }
 
   onStatus(cb: (s: SSEConnectionStatus) => void) {
     this.statusListeners.push(cb);
-    return () => { this.statusListeners = this.statusListeners.filter(l => l !== cb); };
+    return () => {
+      this.statusListeners = this.statusListeners.filter((l) => l !== cb);
+    };
   }
 
   private setStatus(s: SSEConnectionStatus) {
     this.status = s;
-    this.statusListeners.forEach(cb => cb(s));
+    this.statusListeners.forEach((cb) => cb(s));
   }
 
   onFrame(cb: TelemetryCallback) {
     this.listeners.push(cb);
-    return () => { this.listeners = this.listeners.filter(l => l !== cb); };
+    return () => {
+      this.listeners = this.listeners.filter((l) => l !== cb);
+    };
   }
 
   private emit(frame: TelemetryFrame) {
-    this.listeners.forEach(cb => cb(frame));
+    this.listeners.forEach((cb) => cb(frame));
   }
 
   /** Connect to a live SSE endpoint or replay a mock .txt file */
   connect(url: string) {
     this.disconnect();
 
-    if (url.endsWith('.txt') || url.endsWith('.csv')) {
+    if (url.endsWith(".txt") || url.endsWith(".csv")) {
       this.replayFile(url);
       return;
     }
 
-    this.setStatus('connecting');
+    this.setStatus("connecting");
     this.eventSource = new EventSource(url);
 
-    this.eventSource.onopen = () => this.setStatus('connected');
-    this.eventSource.onerror = () => this.setStatus('error');
+    this.eventSource.onopen = () => this.setStatus("connected");
+    this.eventSource.onerror = () => this.setStatus("error");
 
-    this.eventSource.addEventListener('TPV', (e) => {
+    this.eventSource.addEventListener("TPV", (e) => {
       try {
         const data = JSON.parse(e.data);
         const point = this.parseSSEPoint(data);
         if (point) this.processPoint(point);
-      } catch { /* skip bad frames */ }
+      } catch {
+        /* skip bad frames */
+      }
     });
 
     this.eventSource.onmessage = (e) => {
@@ -74,7 +86,7 @@ export class TelemetryStreamService {
         if (point) this.processPoint(point);
       } catch {
         // Try CSV fallback
-        const fields = e.data.split(',');
+        const fields = e.data.split(",");
         if (fields.length >= 6) {
           const point: GpsSSEPoint = {
             time: parseFloat(fields[0]) || Date.now() / 1000,
@@ -101,7 +113,7 @@ export class TelemetryStreamService {
     }
     this.prevPoint = null;
     this.prevTime = 0;
-    this.setStatus('disconnected');
+    this.setStatus("disconnected");
   }
 
   private parseSSEPoint(data: Record<string, unknown>): GpsSSEPoint | null {
@@ -110,7 +122,8 @@ export class TelemetryStreamService {
     if (isNaN(lat) || isNaN(lon)) return null;
     return {
       time: data.time as string | number,
-      lat, lon,
+      lat,
+      lon,
       speed: Number(data.speed) || 0,
       alt: Number(data.alt) || undefined,
       track: Number(data.track) || undefined,
@@ -125,12 +138,15 @@ export class TelemetryStreamService {
   }
 
   private async replayFile(url: string) {
-    this.setStatus('connecting');
+    this.setStatus("connecting");
     try {
       const res = await fetch(url);
       const text = await res.text();
-      const lines = text.trim().split('\n').filter(l => l.trim());
-      this.setStatus('connected');
+      const lines = text
+        .trim()
+        .split("\n")
+        .filter((l) => l.trim());
+      this.setStatus("connected");
 
       let i = 0;
       const playNext = () => {
@@ -141,19 +157,21 @@ export class TelemetryStreamService {
           const data = JSON.parse(lines[i]);
           const point = this.parseSSEPoint(data);
           if (point) this.processPoint(point);
-        } catch { /* skip bad lines */ }
+        } catch {
+          /* skip bad lines */
+        }
         i++;
         this.replayTimer = setTimeout(playNext, 100); // ~10hz
       };
       playNext();
     } catch (err) {
-      console.error('Replay file load failed:', err);
-      this.setStatus('error');
+      console.error("Replay file load failed:", err);
+      this.setStatus("error");
     }
   }
 
   private processPoint(point: GpsSSEPoint) {
-    const now = typeof point.time === 'number' ? point.time : Date.now() / 1000;
+    const now = typeof point.time === "number" ? point.time : Date.now() / 1000;
     const dt = this.prevPoint ? now - this.prevTime : 0.1;
     const speedKmh = point.speed > 200 ? point.speed : point.speed * 3.6;
     const speedMs = speedKmh / 3.6;
@@ -170,15 +188,18 @@ export class TelemetryStreamService {
     let gLat = point.gLat || 0;
     let gLong = point.gLong || 0;
     if (this.prevPoint && dt > 0 && !point.gLat) {
-      const prevSpeedMs = (this.prevPoint.speed > 200 ? this.prevPoint.speed : this.prevPoint.speed * 3.6) / 3.6;
+      const prevSpeedMs =
+        (this.prevPoint.speed > 200
+          ? this.prevPoint.speed
+          : this.prevPoint.speed * 3.6) / 3.6;
       gLong = (speedMs - prevSpeedMs) / (dt * 9.81);
       const prevHeading = this.prevPoint.track || 0;
       const dHeading = ((heading - prevHeading + 540) % 360) - 180;
-      const yawRate = (dHeading * Math.PI / 180) / dt;
+      const yawRate = (dHeading * Math.PI) / 180 / dt;
       gLat = (speedMs * yawRate) / 9.81;
     }
 
-    // Clamp G-forces
+    // Clamp G-forces to a reasonable range for better visualization
     gLat = Math.max(-3, Math.min(3, gLat));
     gLong = Math.max(-3, Math.min(3, gLong));
 

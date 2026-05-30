@@ -1,7 +1,8 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useMemo } from 'react';
 import { RACING_PHYSICS_KNOWLEDGE } from '../utils/coachingKnowledge';
 import { convertToWav } from '../utils/audioUtils';
 import { GoogleGenAI, Modality } from '@google/genai';
+import { GeminiService } from '../services/geminiService';
 import type { CloudModel } from '../types';
 
 interface CloudStatus {
@@ -20,6 +21,8 @@ export const useGeminiCloud = () => {
     hasKey: !!apiKey,
   });
 
+  const geminiService = useMemo(() => new GeminiService(), []);
+
   const setApiKey = useCallback((key: string) => {
     if (key) {
       localStorage.setItem('gemini_api_key', key);
@@ -34,66 +37,25 @@ export const useGeminiCloud = () => {
 
   const generateFeedback = useCallback(
     async (model: CloudModel, contextString: string) => {
-      if (!apiKey) {
-        setStatus({ state: 'error', hasKey: false, error: 'API Key missing' });
-        return '';
-      }
-
       setStatus(prev => ({ ...prev, state: 'loading', error: undefined }));
 
       try {
-        const modelName = model === 'pro' ? 'gemini-2.0-flash' : 'gemini-2.0-flash';
-
-        const prompt = model === 'pro'
-          ? `You are an Elite Driver Coach.
-${RACING_PHYSICS_KNOWLEDGE}
-
-### EXAMPLES:
-**Bad:** "You went too fast. Slow down." → Too generic.
-**Good:** "In Turn 2, telemetry shows a sudden lift. Keep 10-20% 'maintenance throttle'. Physics: Lift-Off Oversteer."
-
-Analyze:
-${contextString}
-
-**Directive:** [Max 10 words]
-### Analysis
-[Detailed markdown with **Physics Diagnosis**, **Telemetry**, **Fix**]`
-          : `You are a Race Engineer.
-${RACING_PHYSICS_KNOWLEDGE}
-
-INPUT: ${contextString}
-
-TASK: Identify the biggest time loss. Explain the error.
-
-**Directive:** [Short instruction]
-### Analysis
-[Explanation]`;
-
-        const body: Record<string, unknown> = {
-          contents: [{ parts: [{ text: prompt }] }],
-        };
-        // Note: thinkingConfig only supported by gemini-2.5-pro models
-
-        const res = await fetch(
-          `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`,
-          { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }
-        );
-
-        if (!res.ok) {
-          const err = await res.json();
-          throw new Error(err.error?.message || res.statusText);
+        let text = '';
+        if (model === 'pro') {
+          text = await geminiService.analyzeLap(contextString);
+        } else {
+          text = await geminiService.generateCoaching(contextString);
         }
 
-        const data = await res.json();
         setStatus(prev => ({ ...prev, state: 'success' }));
-        return data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+        return text;
       } catch (err: unknown) {
         console.error('Gemini Cloud failed:', err);
         setStatus(prev => ({ ...prev, state: 'error', error: (err as Error).message }));
         return '';
       }
     },
-    [apiKey]
+    [geminiService]
   );
 
   const generateAudio = useCallback(async (text: string, voiceName = 'Zephyr'): Promise<Blob | null> => {
