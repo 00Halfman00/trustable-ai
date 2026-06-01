@@ -231,7 +231,11 @@ export class TelemetryStreamService {
     this.prevPoint = { ...point, track: heading };
     this.prevTime = now;
     // 📡 PROBE 1 — trace a frame entering the pipeline:
-    // console.log('📡 FRAME', { speed: frame.speed.toFixed(1), gLat: frame.gLat.toFixed(2), brake: frame.brake.toFixed(0) });
+    console.log("📡 FRAME", {
+      speed: frame.speed.toFixed(1),
+      gLat: frame.gLat.toFixed(2),
+      brake: frame.brake.toFixed(0),
+    });
     this.emit(frame);
   }
 }

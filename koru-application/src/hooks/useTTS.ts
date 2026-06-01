@@ -1,6 +1,5 @@
-import { useState, useCallback, useRef } from 'react';
-import { GoogleGenAI, Modality } from '@google/genai';
-import { convertToWav } from '../utils/audioUtils';
+import { useState, useCallback, useRef, useMemo } from 'react';
+import { GeminiService } from '../services/geminiService';
 import type { TTSProvider } from '../types';
 
 // Gemini prebuilt voice per persona
@@ -26,9 +25,10 @@ interface TTSState {
   isSpeaking: boolean;
 }
 
-export const useTTS = (apiKey: string | null, coachId: string = 'superaj') => {
+export const useTTS = (coachId: string = 'superaj') => {
   const [state, setState] = useState<TTSState>({ provider: 'browser', isSpeaking: false });
   const isFetchingRef = useRef(false);
+  const geminiService = useMemo(() => new GeminiService(), []);
 
   const setProvider = useCallback((provider: TTSProvider) => {
     setState(prev => ({ ...prev, provider }));
@@ -45,7 +45,7 @@ export const useTTS = (apiKey: string | null, coachId: string = 'superaj') => {
 
     try {
       if (state.provider === 'gemini') {
-        await speakGemini(text, apiKey, voice);
+        await speakGemini(text, geminiService, voice);
       } else {
         await speakBrowser(text, browserConfig);
       }
@@ -56,7 +56,7 @@ export const useTTS = (apiKey: string | null, coachId: string = 'superaj') => {
       isFetchingRef.current = false;
       setState(prev => ({ ...prev, isSpeaking: false }));
     }
-  }, [state.provider, apiKey, coachId]);
+  }, [state.provider, coachId, geminiService]);
 
   return { ...state, setProvider, speak };
 };
@@ -75,34 +75,12 @@ function speakBrowser(text: string, config: { rate: number; pitch: number }): Pr
   });
 }
 
-async function speakGemini(text: string, apiKey: string | null, voice: string): Promise<void> {
-  if (!apiKey) throw new Error('API key required');
-  const client = new GoogleGenAI({ apiKey });
-
-  const response = await client.models.generateContentStream({
-    model: 'models/gemini-2.5-pro-preview-tts',
-    config: {
-      responseModalities: [Modality.AUDIO],
-      speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: voice } } },
-    },
-    contents: [{ role: 'user', parts: [{ text: `Read aloud verbatim: "${text}"` }] }],
-  });
-
-  const audioParts: string[] = [];
-  let audioMimeType = '';
-
-  for await (const chunk of response) {
-    const inlineData = chunk.candidates?.[0]?.content?.parts?.[0]?.inlineData;
-    if (inlineData) {
-      audioParts.push(inlineData.data || '');
-      if (!audioMimeType && inlineData.mimeType) audioMimeType = inlineData.mimeType;
-    }
-  }
-
-  if (audioParts.length > 0) {
-    const wavBuffer = convertToWav(audioParts as unknown as string[], audioMimeType || 'audio/pcm; rate=24000');
-    const blob = new Blob([wavBuffer as unknown as BlobPart], { type: 'audio/wav' });
+async function speakGemini(text: string, geminiService: GeminiService, voice: string): Promise<void> {
+  const blob = await geminiService.generateAudio(text, voice);
+  if (blob) {
     await playBlobAudio(blob);
+  } else {
+    throw new Error('Failed to generate audio via backend');
   }
 }
 

@@ -1,88 +1,117 @@
-import { RACING_PHYSICS_KNOWLEDGE } from '../utils/coachingKnowledge';
+import { RACING_PHYSICS_KNOWLEDGE } from "../utils/coachingKnowledge";
 
 /**
  * Gemini Cloud REST wrapper for lap analysis and coaching.
  */
 export class GeminiService {
-
   constructor() {}
 
   /** Generate coaching feedback with Flash */
   async generateCoaching(contextString: string): Promise<string> {
     const prompt = `You are a Race Engineer.
-Reference the racing physics knowledge below to diagnose the user's telemetry.
+    Reference the racing physics knowledge below to diagnose the user's telemetry.
 
-${RACING_PHYSICS_KNOWLEDGE}
+    ${RACING_PHYSICS_KNOWLEDGE}
 
-INPUT DATA:
-${contextString}
+    INPUT DATA:
+    ${contextString}
 
-TASK:
-1. Identify the corner with the biggest time loss.
-2. Explain the error using physics principles.
+    TASK:
+    1. Identify the corner with the biggest time loss.
+    2. Explain the error using physics principles.
 
-OUTPUT FORMAT:
-**Directive:** [Short, actionable instruction]
-### Analysis
-[Detailed explanation using markdown]`;
+    OUTPUT FORMAT:
+    **Directive:** [Short, actionable instruction]
+    ### Analysis
+    [Detailed explanation using markdown]`;
 
-    return this.callApi('gemini-2.5-flash-lite', prompt);
+    return this.callApi("gemini-2.5-flash-lite", prompt);
   }
 
   /** Deep lap analysis with Pro + thinking */
   async analyzeLap(lapData: string): Promise<string> {
     const prompt = `You are an Elite Driver Coach analyzing a full lap.
 
-${RACING_PHYSICS_KNOWLEDGE}
+    ${RACING_PHYSICS_KNOWLEDGE}
 
-### EXAMPLES OF EXPERT ANALYSIS:
-**Bad:** "You went too slow. Speed up." → Too generic.
-**Good:** "In Turn 2, the telemetry shows a sudden throttle lift. Keep 10-20% 'maintenance throttle' to keep the rear planted. Physics: Lift-Off Oversteer (Weight Transfer Rule #2)."
+    ### EXAMPLES OF EXPERT ANALYSIS:
+    **Bad:** "You went too slow. Speed up." → Too generic.
+    **Good:** "In Turn 2, the telemetry shows a sudden throttle lift. Keep 10-20% 'maintenance throttle' to keep the rear planted. Physics: Lift-Off Oversteer (Weight Transfer Rule #2)."
 
-### LAP DATA:
-${lapData}
+    ### LAP DATA:
+    ${lapData}
 
-Analyze the lap. For each issue found:
-**Directive:** [Max 10 words]
-### Analysis
-**Physics Diagnosis:** [explanation]
-**Telemetry Evidence:** [data reference]
-**Fix:** [actionable instruction]`;
+    Analyze the lap. For each issue found:
+    **Directive:** [Max 10 words]
+    ### Analysis
+    **Physics Diagnosis:** [explanation]
+    **Telemetry Evidence:** [data reference]
+    **Fix:** [actionable instruction]`;
 
-    return this.callApi('gemini-2.5-flash-lite', prompt);
+    return this.callApi("gemini-2.5-flash-lite", prompt);
   }
 
-  private async callApi(model: string, prompt: string, generationConfig?: Record<string, unknown>): Promise<string> {
+  /** Request TTS from backend proxy */
+  async generateAudio(text: string, voice: string = 'Zephyr'): Promise<Blob | null> {
+    try {
+      const res = await fetch(`http://localhost:8080/tts`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text, voice }),
+      });
+
+      if (!res.ok) {
+        throw new Error(`TTS failed: ${res.statusText}`);
+      }
+
+      const data = await res.json();
+      if (data.error) throw new Error(data.error);
+      if (!data.audioData) return null;
+
+      // The backend returns base64 in audioData
+      const binaryString = atob(data.audioData);
+      const bytes = new Uint8Array(binaryString.length);
+      for (let i = 0; i < binaryString.length; i++) {
+        bytes[i] = binaryString.charCodeAt(i);
+      }
+
+      return new Blob([bytes], { type: data.mimeType || 'audio/wav' });
+    } catch (err) {
+      console.error("GeminiService TTS error:", err);
+      return null;
+    }
+  }
+
+  private async callApi(
+    model: string,
+    prompt: string,
+    generationConfig?: Record<string, unknown>,
+  ): Promise<string> {
     // No longer sending the body to Google's URL.
     // We are sending it to YOUR Python Telemetry Server.
     const body = {
       model: model,
       prompt: prompt,
-      generationConfig: generationConfig
+      generationConfig: generationConfig,
     };
-    
 
     try {
       // Assuming your Python server runs on port 8080
-      const res = await fetch(
-        `http://localhost:8080/coach`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(body)
-        }
-      );
+      const res = await fetch(`http://localhost:8080/coach`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
 
       if (!res.ok) {
         const err = await res.json();
         throw new Error(err.detail || res.statusText);
       }
       const data = await res.json();
-      return data.text  || '';  // Adjust this based on how you structure your Python return (e.g., data.text)
-
+      return data.text || ""; // Adjust this based on how you structure your Python return (e.g., data.text)
     } catch (err) {
-      console.error('GeminiService error:', err);
-      return 'The Strategy Coach is unavailable. Please check the backend telemetry server.';
+      console.error("GeminiService error:", err);
+      return "The Strategy Coach is unavailable. Please check the backend telemetry server.";
     }
   }
 }

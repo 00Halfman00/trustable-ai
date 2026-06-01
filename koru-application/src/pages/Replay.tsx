@@ -14,11 +14,7 @@ import type { TelemetryFrame, TTSProvider } from '../types';
 import { Upload } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 
-interface ReplayProps {
-  apiKey: string | null;
-}
-
-export default function Replay({ apiKey }: ReplayProps) {
+export default function Replay() {
   const [frames, setFrames] = useState<TelemetryFrame[]>([]);
   const [currentIdx, setCurrentIdx] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -29,17 +25,13 @@ export default function Replay({ apiKey }: ReplayProps) {
   const [analysisResult, setAnalysisResult] = useState('');
 
   const { generateFeedback, status: cloudStatus } = useGeminiCloud();
-  const { speak, setProvider, provider, isSpeaking } = useTTS(apiKey, activeCoach);
+  const { speak, setProvider, provider, isSpeaking } = useTTS(activeCoach);
   const { analyzeLap, checkLookahead } = usePredictiveCoaching();
 
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const coachRef = useRef(new CoachingService());
 
   // Wire up coaching service
-  useEffect(() => {
-    if (apiKey) coachRef.current.setApiKey(apiKey);
-  }, [apiKey]);
-
   useEffect(() => {
     coachRef.current.setCoach(activeCoach);
   }, [activeCoach]);

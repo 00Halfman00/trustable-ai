@@ -11,11 +11,7 @@ import GaugeCluster from '../components/GaugeCluster';
 import type { TelemetryFrame, SSEConnectionStatus, TTSProvider } from '../types';
 import { Radio, Unplug } from 'lucide-react';
 
-interface LiveSessionProps {
-  apiKey: string | null;
-}
-
-export default function LiveSession({ apiKey }: LiveSessionProps) {
+export default function LiveSession() {
   const [frames, setFrames] = useState<TelemetryFrame[]>([]);
   const [messages, setMessages] = useState<CoachMessage[]>([]);
   const [status, setStatus] = useState<SSEConnectionStatus>('disconnected');
@@ -26,17 +22,13 @@ export default function LiveSession({ apiKey }: LiveSessionProps) {
   const streamRef = useRef(TelemetryStreamService.getInstance());
   const coachRef = useRef(new CoachingService());
   const audioRef = useRef(new AudioService());
-  const { speak, setProvider, provider } = useTTS(apiKey, activeCoach);
+  const { speak, setProvider, provider } = useTTS(activeCoach);
 
   useEffect(() => {
     const audio = audioRef.current;
     audio.init();
     return () => audio.destroy();
   }, []);
-
-  useEffect(() => {
-    if (apiKey) coachRef.current.setApiKey(apiKey);
-  }, [apiKey]);
 
   useEffect(() => {
     const stream = streamRef.current;

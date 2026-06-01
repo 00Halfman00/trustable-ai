@@ -20,12 +20,10 @@ export class CoachingService {
   private lastCorner: Corner | null = null;
   private coldCooldownMs = 15000;
   private hotCooldownMs = 1500;
-  private apiKey: string | null = null;
   private geminiService = new GeminiService();
 
   setCoach(id: string) { this.coachId = id; }
   getCoach() { return COACHES[this.coachId] || COACHES[DEFAULT_COACH]; }
-  setApiKey(key: string) { this.apiKey = key; }
   onCoaching(cb: CoachingCallback) {
     this.listeners.push(cb);
     return () => { this.listeners = this.listeners.filter(l => l !== cb); };
